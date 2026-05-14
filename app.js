@@ -198,30 +198,27 @@
     }
   }
 
-  function uploadPhoto(base64, mimeType, tag, onPhase) {
+  async function uploadPhoto(base64, mimeType, tag, onPhase) {
     const { url, secret } = getConfig();
     const body = JSON.stringify({
       action: "photo", secret: secret, tag: tag,
       photoBase64: base64, mimeType: mimeType
     });
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open("POST", url);
-      xhr.setRequestHeader("Content-Type", "text/plain;charset=utf-8");
-      xhr.upload.onprogress = e => {
-        if (!e.lengthComputable) return;
-        const pct = Math.round(e.loaded / e.total * 100);
-        if (onPhase) onPhase(pct < 100 ? `Uploading ${pct}%…` : "Processing on server…");
-      };
-      xhr.upload.onload = () => { if (onPhase) onPhase("Processing on server…"); };
-      xhr.onload = () => {
-        try { resolve(JSON.parse(xhr.responseText)); }
-        catch (e) { reject(new Error("bad response")); }
-      };
-      xhr.onerror = () => reject(new Error("network"));
-      xhr.ontimeout = () => reject(new Error("timeout"));
-      xhr.send(body);
-    });
+    if (onPhase) onPhase("Uploading…");
+    // After ~3s switch to "Processing on server…" since Gemini call dominates
+    let serverTimer = setTimeout(() => { if (onPhase) onPhase("Processing on server…"); }, 3000);
+    try {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: body
+      });
+      clearTimeout(serverTimer);
+      return await r.json();
+    } catch (e) {
+      clearTimeout(serverTimer);
+      throw e;
+    }
   }
 
   // ---- Upload cards ------------------------------------------------------
