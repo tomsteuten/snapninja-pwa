@@ -18,8 +18,11 @@
   const captureBtn = $("captureBtn");
   const fileInput = $("fileInput");
   const tagRow = $("tagRow");
-  const resultEl = $("result");
+  const uploadsEl = $("uploads");
   const pendingEl = $("pending");
+
+  let uploadSeq = 0;
+  const SUCCESS_FADE_MS = 60000; // success cards auto-dismiss after 1 min
 
   let currentTag = "serial";
   let activeContext = null;
@@ -170,40 +173,96 @@
   // ---- Resize + upload ---------------------------------------------------
 
   async function handlePhoto(file) {
-    showResult("Resizing…", "");
+    const card = createCard(currentTag);
+    const tagAtCapture = currentTag;
     try {
+      setCardStatus(card, "Resizing…");
       const { base64, mimeType, sizeKB } = await resizeToBase64(file);
-      showResult(`Uploading (${sizeKB} KB)…`, "");
-      const resp = await uploadPhoto(base64, mimeType);
+      setCardStatus(card, `Uploading ${sizeKB} KB…`);
+      const resp = await uploadPhoto(base64, mimeType, tagAtCapture, (phase) => {
+        setCardStatus(card, phase);
+      });
       if (!resp.ok) {
-        showResult(null, "Upload failed: " + (resp.error || "unknown"));
-        savePending(base64, mimeType, currentTag);
+        setCardError(card, "Failed: " + (resp.error || "unknown"));
+        savePending(base64, mimeType, tagAtCapture);
         return;
       }
       clearPending();
       const ocrLine = resp.ocrResult
         ? resp.ocrResult
         : (resp.ocrError ? "(OCR failed: " + resp.ocrError + ")" : "(no OCR for this tag)");
-      showResult(`✓ Saved as ${resp.filename}`, ocrLine, true);
-      // Re-fetch context in case it changed during upload
+      setCardSuccess(card, resp.filename, ocrLine);
       refreshContext();
     } catch (e) {
-      showResult(null, "Error: " + e.message);
+      setCardError(card, "Error: " + e.message);
     }
   }
 
-  async function uploadPhoto(base64, mimeType) {
+  function uploadPhoto(base64, mimeType, tag, onPhase) {
     const { url, secret } = getConfig();
     const body = JSON.stringify({
-      action: "photo", secret: secret, tag: currentTag,
+      action: "photo", secret: secret, tag: tag,
       photoBase64: base64, mimeType: mimeType
     });
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: body
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", url);
+      xhr.setRequestHeader("Content-Type", "text/plain;charset=utf-8");
+      xhr.upload.onprogress = e => {
+        if (!e.lengthComputable) return;
+        const pct = Math.round(e.loaded / e.total * 100);
+        if (onPhase) onPhase(pct < 100 ? `Uploading ${pct}%…` : "Processing on server…");
+      };
+      xhr.upload.onload = () => { if (onPhase) onPhase("Processing on server…"); };
+      xhr.onload = () => {
+        try { resolve(JSON.parse(xhr.responseText)); }
+        catch (e) { reject(new Error("bad response")); }
+      };
+      xhr.onerror = () => reject(new Error("network"));
+      xhr.ontimeout = () => reject(new Error("timeout"));
+      xhr.send(body);
     });
-    return r.json();
+  }
+
+  // ---- Upload cards ------------------------------------------------------
+
+  function createCard(tag) {
+    const id = ++uploadSeq;
+    const el = document.createElement("div");
+    el.className = "upCard";
+    el.dataset.id = id;
+    el.innerHTML = `
+      <div class="upHead">
+        <span class="upTag">${escapeHtml(tag)}</span>
+        <span class="upStatus"><span class="spin"></span><span class="upStatusText">Starting…</span></span>
+        <button class="upDismiss" aria-label="Dismiss">×</button>
+      </div>
+      <div class="upBody"></div>
+    `;
+    el.querySelector(".upDismiss").onclick = () => el.remove();
+    uploadsEl.insertBefore(el, uploadsEl.firstChild);
+    return el;
+  }
+
+  function setCardStatus(card, text) {
+    const t = card.querySelector(".upStatusText");
+    if (t) t.textContent = text;
+  }
+
+  function setCardSuccess(card, filename, ocrText) {
+    card.classList.add("success");
+    card.querySelector(".upStatus").innerHTML = `<span style="color:var(--accent);">✓ ${escapeHtml(filename)}</span>`;
+    card.querySelector(".upBody").textContent = ocrText;
+    setTimeout(() => {
+      card.classList.add("fading");
+      setTimeout(() => card.remove(), 600);
+    }, SUCCESS_FADE_MS);
+  }
+
+  function setCardError(card, msg) {
+    card.classList.add("error");
+    card.querySelector(".upStatus").innerHTML = `<span style="color:var(--error);">✗</span>`;
+    card.querySelector(".upBody").textContent = msg;
   }
 
   function resizeToBase64(file) {
@@ -268,15 +327,23 @@
     pendingEl.querySelector('[data-act=retry]').onclick = async () => {
       const saved = currentTag; currentTag = p.tag;
       pendingEl.classList.add("hidden");
-      const resp = await uploadPhoto(p.base64, p.mimeType);
-      currentTag = saved;
-      if (resp.ok) {
-        clearPending();
-        const ocrLine = resp.ocrResult || resp.ocrError || "(no OCR)";
-        showResult(`✓ Saved as ${resp.filename}`, ocrLine, true);
-      } else {
+      const card = createCard(p.tag);
+      setCardStatus(card, "Retrying…");
+      try {
+        const resp = await uploadPhoto(p.base64, p.mimeType, p.tag, s => setCardStatus(card, s));
+        currentTag = saved;
+        if (resp.ok) {
+          clearPending();
+          const ocrLine = resp.ocrResult || resp.ocrError || "(no OCR)";
+          setCardSuccess(card, resp.filename, ocrLine);
+        } else {
+          renderPending();
+          setCardError(card, "Retry failed: " + (resp.error || "unknown"));
+        }
+      } catch (e) {
+        currentTag = saved;
         renderPending();
-        showResult(null, "Retry failed: " + (resp.error || "unknown"));
+        setCardError(card, "Retry error: " + e.message);
       }
     };
     pendingEl.querySelector('[data-act=discard]').onclick = clearPending;
