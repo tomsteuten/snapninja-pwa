@@ -179,6 +179,34 @@
   }
 
   .hidden { display: none !important; }
+
+  .recentBox { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+  .recentHead {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 12px; cursor: pointer; user-select: none;
+    font-size: 13px; color: var(--muted);
+  }
+  .recentHead .chev { transition: transform 0.15s; }
+  .recentBox.open .recentHead .chev { transform: rotate(90deg); }
+  .recentList { display: none; padding: 0 12px 10px; flex-direction: column; gap: 6px; }
+  .recentBox.open .recentList { display: flex; }
+  .recentItem {
+    display: flex; gap: 8px; align-items: center;
+    padding: 6px; border-top: 1px solid var(--border);
+    text-decoration: none; color: var(--text);
+  }
+  .recentItem:first-child { border-top: none; }
+  .recentItem .rTag {
+    background: var(--border); padding: 2px 6px; border-radius: 4px;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;
+    flex: 0 0 auto;
+  }
+  .recentItem .rText {
+    flex: 1; font-size: 13px; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .recentItem .rText .rOcr { color: var(--muted); }
+  .recentEmpty { padding: 4px 6px; color: var(--muted); font-size: 13px; }
 </style>
 </head>
 <body>
@@ -203,6 +231,13 @@
   </div>
 
   <div id="pending" class="hidden"></div>
+  <div id="recent" class="recentBox hidden">
+    <div class="recentHead">
+      <span><span class="chev">▶</span> <span id="recentLabel">Recent photos for this job</span></span>
+      <span id="recentCount" style="font-size:12px;"></span>
+    </div>
+    <div class="recentList" id="recentList"></div>
+  </div>
   <div id="uploads"></div>
 
   <div class="captureRow">

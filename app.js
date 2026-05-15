@@ -22,6 +22,12 @@
   const tagRow = $("tagRow");
   const uploadsEl = $("uploads");
   const pendingEl = $("pending");
+  const recentEl = $("recent");
+  const recentListEl = $("recentList");
+  const recentCountEl = $("recentCount");
+
+  const RECENT_LIMIT = 8;
+  const RECENT_REFRESH_MS = 30000;
 
   let uploadSeq = 0;
   const SUCCESS_FADE_MS = 60000; // success cards auto-dismiss after 1 min
@@ -76,9 +82,10 @@
       const newCtx = data.context;
       const newKey = newCtx ? `${newCtx.caseNum}::${newCtx.taskNum}` : "";
       const oldKey = activeContext ? `${activeContext.caseNum}::${activeContext.taskNum}` : "";
-      if (newKey !== oldKey) confirmedStale = false;
+      if (newKey !== oldKey) { confirmedStale = false; recentListEl.innerHTML = ""; }
       activeContext = newCtx;
       renderContext(newCtx, null);
+      if (newKey !== oldKey) refreshRecent();
     } catch (e) {
       renderContext(null, "Network error: " + e.message);
     }
@@ -128,6 +135,51 @@
   function updateCaptureBtn() {
     captureBtn.disabled = !activeContext;
     galleryBtn.disabled = !activeContext;
+  }
+
+  // ---- Recent photos for current job --------------------------------------
+
+  recentEl.querySelector(".recentHead").addEventListener("click", () => {
+    recentEl.classList.toggle("open");
+  });
+
+  async function refreshRecent() {
+    if (!activeContext) { recentEl.classList.add("hidden"); return; }
+    const { url, secret } = getConfig();
+    if (!url || !secret) return;
+    const qs = `action=photos&secret=${encodeURIComponent(secret)}` +
+      `&caseNum=${encodeURIComponent(activeContext.caseNum)}` +
+      `&taskNum=${encodeURIComponent(activeContext.taskNum)}`;
+    try {
+      const r = await fetch(`${url}?${qs}`);
+      const data = await r.json();
+      if (!data.ok || !Array.isArray(data.photos)) return;
+      renderRecent(data.photos);
+    } catch (e) {
+      console.warn("[SnapNinja] recent fetch failed:", e);
+    }
+  }
+
+  function renderRecent(photos) {
+    const sorted = photos.slice().sort((a, b) =>
+      String(b.timestamp || "").localeCompare(String(a.timestamp || ""))
+    );
+    const shown = sorted.slice(0, RECENT_LIMIT);
+    recentEl.classList.remove("hidden");
+    recentCountEl.textContent = sorted.length ? `${shown.length}/${sorted.length}` : "0";
+    if (!shown.length) {
+      recentListEl.innerHTML = `<div class="recentEmpty">No photos uploaded for this job yet.</div>`;
+      return;
+    }
+    recentListEl.innerHTML = shown.map(p => {
+      const ocr = (p.ocrResult || "").replace(/\s+/g, " ").trim();
+      const ocrSnippet = ocr && ocr !== "NONE" ? ocr.slice(0, 80) : "";
+      const href = p.driveUrl || "#";
+      return `<a class="recentItem" href="${escapeHtml(href)}" target="_blank" rel="noopener">
+        <span class="rTag">${escapeHtml(p.tag || "")}</span>
+        <span class="rText">${escapeHtml(p.filename || "")}${ocrSnippet ? ` <span class="rOcr">— ${escapeHtml(ocrSnippet)}</span>` : ""}</span>
+      </a>`;
+    }).join("");
   }
 
   // ---- Tag selection ------------------------------------------------------
@@ -201,6 +253,7 @@
         : (resp.ocrError ? "(OCR failed: " + resp.ocrError + ")" : "(no OCR for this tag)");
       setCardSuccess(card, resp.filename, ocrLine);
       refreshContext();
+      refreshRecent();
     } catch (e) {
       setCardError(card, "Error: " + e.message);
     }
@@ -415,6 +468,7 @@
   } else {
     refreshContext();
     setInterval(refreshContext, CTX_REFRESH_MS);
+    setInterval(refreshRecent, RECENT_REFRESH_MS);
     // Re-render age every 10s without re-fetching
     setInterval(() => { if (activeContext) renderContext(activeContext, null); }, 10000);
     renderPending();
