@@ -82,10 +82,10 @@
   .galleryBtn {
     background: var(--panel); color: var(--text);
     border: 1px solid var(--border); border-radius: 14px;
-    padding: 10px 12px; min-height: 80px;
-    cursor: pointer; flex: 0 0 96px;
+    padding: 8px 10px; min-height: 80px;
+    cursor: pointer; flex: 0 0 116px;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
-    font-size: 13px; font-weight: 500;
+    font-size: 12px; font-weight: 500; line-height: 1.2; text-align: center;
   }
   .galleryBtn .galleryIcon { font-size: 22px; line-height: 1; }
   .galleryBtn:disabled { color: var(--muted); }
@@ -244,7 +244,7 @@
     <button id="captureBtn" class="captureBtn">📷 Take Photo</button>
     <button id="galleryBtn" class="galleryBtn" aria-label="Upload from gallery">
       <span class="galleryIcon">🖼️</span>
-      <span>Gallery</span>
+      <span>Upload from Gallery</span>
     </button>
   </div>
   <input type="file" id="fileInput" accept="image/*" capture="environment">
