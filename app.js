@@ -16,7 +16,9 @@
   const setup = $("setupScreen");
   const ctxEl = $("ctx");
   const captureBtn = $("captureBtn");
+  const galleryBtn = $("galleryBtn");
   const fileInput = $("fileInput");
+  const galleryInput = $("galleryInput");
   const tagRow = $("tagRow");
   const uploadsEl = $("uploads");
   const pendingEl = $("pending");
@@ -125,6 +127,7 @@
 
   function updateCaptureBtn() {
     captureBtn.disabled = !activeContext;
+    galleryBtn.disabled = !activeContext;
   }
 
   // ---- Tag selection ------------------------------------------------------
@@ -139,23 +142,27 @@
 
   // ---- Capture ------------------------------------------------------------
 
-  captureBtn.addEventListener("click", () => {
+  function triggerPicker(input) {
     if (!activeContext) return;
     if (isStale() && !confirmedStale) {
-      showStaleConfirm();
+      showStaleConfirm(input);
       return;
     }
-    fileInput.value = "";
-    fileInput.click();
-  });
+    input.value = "";
+    input.click();
+  }
 
-  fileInput.addEventListener("change", async () => {
-    const file = fileInput.files && fileInput.files[0];
-    if (!file) return;
-    await handlePhoto(file);
-  });
+  captureBtn.addEventListener("click", () => triggerPicker(fileInput));
+  galleryBtn.addEventListener("click", () => triggerPicker(galleryInput));
 
-  function showStaleConfirm() {
+  async function onFilesChosen(input) {
+    const files = input.files ? [...input.files] : [];
+    for (const f of files) await handlePhoto(f);
+  }
+  fileInput.addEventListener("change", () => onFilesChosen(fileInput));
+  galleryInput.addEventListener("change", () => onFilesChosen(galleryInput));
+
+  function showStaleConfirm(input) {
     const wrap = document.createElement("div");
     wrap.className = "confirmRow";
     wrap.innerHTML = `
@@ -164,7 +171,7 @@
     `;
     wrap.addEventListener("click", e => {
       const act = e.target.dataset.act;
-      if (act === "ok") { confirmedStale = true; wrap.remove(); fileInput.value=""; fileInput.click(); }
+      if (act === "ok") { confirmedStale = true; wrap.remove(); input.value=""; input.click(); }
       if (act === "cancel") wrap.remove();
     });
     ctxEl.appendChild(wrap);
