@@ -207,17 +207,34 @@
     if (onPhase) onPhase("Uploading…");
     // After ~3s switch to "Processing on server…" since Gemini call dominates
     let serverTimer = setTimeout(() => { if (onPhase) onPhase("Processing on server…"); }, 3000);
+    let r;
     try {
-      const r = await fetch(url, {
+      r = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: body
+        body: body,
+        redirect: "follow"
       });
-      clearTimeout(serverTimer);
-      return await r.json();
     } catch (e) {
       clearTimeout(serverTimer);
-      throw e;
+      console.error("[SnapNinja] fetch threw:", e);
+      const detail = `${e.name || "Error"}: ${e.message || String(e)} | url=${url.slice(0,60)}… | bodyKB=${Math.round(body.length/1024)}`;
+      throw new Error(detail);
+    }
+    clearTimeout(serverTimer);
+    let text;
+    try {
+      text = await r.text();
+    } catch (e) {
+      console.error("[SnapNinja] body read threw:", e);
+      throw new Error(`Body read fail: ${e.message} | status=${r.status} | final=${r.url}`);
+    }
+    console.log("[SnapNinja] response status", r.status, "len", text.length, "final", r.url);
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      const snippet = text.slice(0, 300).replace(/\s+/g, " ");
+      throw new Error(`Bad JSON (status ${r.status}, ${text.length}B): ${snippet}`);
     }
   }
 
