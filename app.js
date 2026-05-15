@@ -295,38 +295,51 @@
     card.querySelector(".upBody").textContent = msg;
   }
 
-  function resizeToBase64(file) {
-    return new Promise((resolve, reject) => {
+  async function decodeWithOrientation(file) {
+    // Prefer createImageBitmap with EXIF orientation applied, so portrait-mode
+    // phone photos and gallery screenshots don't end up rotated on the canvas.
+    if (typeof createImageBitmap === "function") {
+      try {
+        return await createImageBitmap(file, { imageOrientation: "from-image" });
+      } catch (e) {
+        console.warn("[SnapNinja] createImageBitmap failed, falling back:", e);
+      }
+    }
+    return await new Promise((resolve, reject) => {
       const img = new Image();
       const reader = new FileReader();
       reader.onload = () => { img.src = reader.result; };
       reader.onerror = () => reject(new Error("read fail"));
-      img.onload = () => {
-        const { width, height } = img;
-        const longest = Math.max(width, height);
-        const scale = longest > RESIZE_MAX_EDGE ? RESIZE_MAX_EDGE / longest : 1;
-        const w = Math.round(width * scale);
-        const h = Math.round(height * scale);
-        const canvas = document.createElement("canvas");
-        canvas.width = w; canvas.height = h;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, w, h);
-        const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
-        const base64 = dataUrl.split(",")[1];
-        const sizeKB = Math.round(base64.length * 3 / 4 / 1024);
-        // Small thumbnail for the upload card (~128px longest edge)
-        const tScale = 128 / Math.max(w, h);
-        const tw = Math.max(1, Math.round(w * tScale));
-        const th = Math.max(1, Math.round(h * tScale));
-        const tCanvas = document.createElement("canvas");
-        tCanvas.width = tw; tCanvas.height = th;
-        tCanvas.getContext("2d").drawImage(canvas, 0, 0, tw, th);
-        const thumbDataUrl = tCanvas.toDataURL("image/jpeg", 0.6);
-        resolve({ base64, mimeType: "image/jpeg", sizeKB, thumbDataUrl });
-      };
+      img.onload = () => resolve(img);
       img.onerror = () => reject(new Error("decode fail"));
       reader.readAsDataURL(file);
     });
+  }
+
+  async function resizeToBase64(file) {
+    const source = await decodeWithOrientation(file);
+    const width = source.width;
+    const height = source.height;
+    const longest = Math.max(width, height);
+    const scale = longest > RESIZE_MAX_EDGE ? RESIZE_MAX_EDGE / longest : 1;
+    const w = Math.round(width * scale);
+    const h = Math.round(height * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    canvas.getContext("2d").drawImage(source, 0, 0, w, h);
+    const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+    const base64 = dataUrl.split(",")[1];
+    const sizeKB = Math.round(base64.length * 3 / 4 / 1024);
+    // Small thumbnail for the upload card (~128px longest edge)
+    const tScale = 128 / Math.max(w, h);
+    const tw = Math.max(1, Math.round(w * tScale));
+    const th = Math.max(1, Math.round(h * tScale));
+    const tCanvas = document.createElement("canvas");
+    tCanvas.width = tw; tCanvas.height = th;
+    tCanvas.getContext("2d").drawImage(canvas, 0, 0, tw, th);
+    const thumbDataUrl = tCanvas.toDataURL("image/jpeg", 0.6);
+    if (source.close) source.close(); // release ImageBitmap
+    return { base64, mimeType: "image/jpeg", sizeKB, thumbDataUrl };
   }
 
   function showResult(headline, body, success) {
