@@ -184,7 +184,8 @@
     const tagAtCapture = currentTag;
     try {
       setCardStatus(card, "Resizing…");
-      const { base64, mimeType, sizeKB } = await resizeToBase64(file);
+      const { base64, mimeType, sizeKB, thumbDataUrl } = await resizeToBase64(file);
+      setCardThumb(card, thumbDataUrl);
       setCardStatus(card, `Uploading ${sizeKB} KB…`);
       const resp = await uploadPhoto(base64, mimeType, tagAtCapture, (phase) => {
         setCardStatus(card, phase);
@@ -258,7 +259,10 @@
         <span class="upStatus"><span class="spin"></span><span class="upStatusText">Starting…</span></span>
         <button class="upDismiss" aria-label="Dismiss">×</button>
       </div>
-      <div class="upBody"></div>
+      <div class="upRow">
+        <img class="upThumb" alt="" hidden>
+        <div class="upBody"></div>
+      </div>
     `;
     el.querySelector(".upDismiss").onclick = () => el.remove();
     uploadsEl.insertBefore(el, uploadsEl.firstChild);
@@ -268,6 +272,11 @@
   function setCardStatus(card, text) {
     const t = card.querySelector(".upStatusText");
     if (t) t.textContent = text;
+  }
+
+  function setCardThumb(card, dataUrl) {
+    const img = card.querySelector(".upThumb");
+    if (img && dataUrl) { img.src = dataUrl; img.hidden = false; }
   }
 
   function setCardSuccess(card, filename, ocrText) {
@@ -305,7 +314,15 @@
         const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
         const base64 = dataUrl.split(",")[1];
         const sizeKB = Math.round(base64.length * 3 / 4 / 1024);
-        resolve({ base64, mimeType: "image/jpeg", sizeKB });
+        // Small thumbnail for the upload card (~128px longest edge)
+        const tScale = 128 / Math.max(w, h);
+        const tw = Math.max(1, Math.round(w * tScale));
+        const th = Math.max(1, Math.round(h * tScale));
+        const tCanvas = document.createElement("canvas");
+        tCanvas.width = tw; tCanvas.height = th;
+        tCanvas.getContext("2d").drawImage(canvas, 0, 0, tw, th);
+        const thumbDataUrl = tCanvas.toDataURL("image/jpeg", 0.6);
+        resolve({ base64, mimeType: "image/jpeg", sizeKB, thumbDataUrl });
       };
       img.onerror = () => reject(new Error("decode fail"));
       reader.readAsDataURL(file);
