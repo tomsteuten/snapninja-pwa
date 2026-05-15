@@ -5,6 +5,7 @@
   const LS_URL    = "snapninja.endpoint";
   const LS_SECRET = "snapninja.secret";
   const LS_PENDING = "snapninja.pending";
+  const LS_TAG = "snapninja.tag";
 
   const STALE_MS = 8 * 60 * 60 * 1000; // 8h — confirm before capture
   const CTX_REFRESH_MS = 15000;
@@ -25,6 +26,14 @@
   const recentEl = $("recent");
   const recentListEl = $("recentList");
   const recentCountEl = $("recentCount");
+  const tabPanels = Array.from(document.querySelectorAll(".tabPanel"));
+  const tabButtons = Array.from(document.querySelectorAll(".tabBtn"));
+  const actionsJobSummaryEl = $("actionsJobSummary");
+  const actionGridEl = $("actionGrid");
+  const actionMsgEl = $("actionMsg");
+  const partsSearchEl = $("partsSearch");
+  const partsMsgEl = $("partsMsg");
+  const partsResultsEl = $("partsResults");
 
   const RECENT_LIMIT = 8;
   const RECENT_REFRESH_MS = 30000;
@@ -33,8 +42,20 @@
   const SUCCESS_FADE_MS = 60000; // success cards auto-dismiss after 1 min
 
   let currentTag = "serial";
+  const validTags = new Set(Array.from(tagRow.querySelectorAll(".tagBtn")).map(b => b.dataset.tag));
   let activeContext = null;
   let confirmedStale = false; // user has tapped through staleness for current ctx
+
+  // ---- Tabs ---------------------------------------------------------------
+
+  function switchTab(tabId) {
+    tabPanels.forEach(panel => panel.classList.toggle("active", panel.id === tabId));
+    tabButtons.forEach(btn => btn.classList.toggle("active", btn.dataset.tab === tabId));
+  }
+
+  tabButtons.forEach(btn => {
+    btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+  });
 
   // ---- Setup screen -------------------------------------------------------
 
@@ -96,12 +117,14 @@
     if (errMsg) {
       ctxEl.classList.add("error");
       ctxEl.innerHTML = `<div class="ctxLine1">No connection</div><div class="ctxLine2">${escapeHtml(errMsg)}</div>`;
+      updateActionTab();
       updateCaptureBtn();
       return;
     }
     if (!ctx) {
       ctxEl.classList.add("error");
       ctxEl.innerHTML = `<div class="ctxLine1">No active job</div><div class="ctxLine2">Open a job on the Surface (NetSuite Ninja) first.</div>`;
+      updateActionTab();
       updateCaptureBtn();
       return;
     }
@@ -114,6 +137,7 @@
       <div class="ctxLine2">${escapeHtml(ctx.site || "(no site)")}${ctx.assetNum ? " · " + escapeHtml(ctx.assetNum) : ""}</div>
       <div class="ctxAge ${stale ? "stale" : ""}">set ${ageStr} ago${stale ? " — confirm before capture" : ""}</div>
     `;
+    updateActionTab();
     updateCaptureBtn();
   }
 
@@ -184,13 +208,75 @@
 
   // ---- Tag selection ------------------------------------------------------
 
+  function applyTagSelection(tag) {
+    if (!validTags.has(tag)) return;
+    currentTag = tag;
+    Array.from(tagRow.children).forEach(b => b.classList.toggle("active", b.dataset.tag === tag));
+  }
+
+  function restoreTagSelection() {
+    const savedTag = localStorage.getItem(LS_TAG);
+    if (savedTag && validTags.has(savedTag)) {
+      applyTagSelection(savedTag);
+    }
+  }
+
   tagRow.addEventListener("click", e => {
     const btn = e.target.closest(".tagBtn");
     if (!btn) return;
-    [...tagRow.children].forEach(b => b.classList.remove("active"));
-    btn.classList.add("active");
-    currentTag = btn.dataset.tag;
+    applyTagSelection(btn.dataset.tag);
+    localStorage.setItem(LS_TAG, currentTag);
   });
+
+  // ---- Actions + Parts placeholders --------------------------------------
+
+  function showTempMessage(el, msg) {
+    if (!el) return;
+    el.textContent = msg;
+    clearTimeout(el._msgTimer);
+    el._msgTimer = setTimeout(() => { el.textContent = ""; }, 2000);
+  }
+
+  function updateActionTab() {
+    if (!actionsJobSummaryEl || !actionGridEl) return;
+    if (!activeContext) {
+      actionsJobSummaryEl.textContent = "No active job. Open a job on the Surface (NetSuite Ninja) first.";
+      actionGridEl.querySelectorAll(".actionBtn").forEach(btn => { btn.disabled = true; });
+      return;
+    }
+    actionsJobSummaryEl.textContent =
+      `CASE-${activeContext.caseNum} · TASK ${activeContext.taskNum}` +
+      `${activeContext.site ? ` · ${activeContext.site}` : ""}` +
+      `${activeContext.assetNum ? ` · ${activeContext.assetNum}` : ""}`;
+    actionGridEl.querySelectorAll(".actionBtn").forEach(btn => { btn.disabled = false; });
+  }
+
+  if (actionGridEl) {
+    actionGridEl.addEventListener("click", e => {
+      const btn = e.target.closest(".actionBtn");
+      if (!btn || btn.disabled) return;
+      showTempMessage(actionMsgEl, "Action queue not wired yet");
+    });
+  }
+
+  if (partsSearchEl) {
+    const updatePartsPlaceholder = () => {
+      const q = (partsSearchEl.value || "").trim();
+      if (!q) {
+        partsResultsEl.textContent = "Parts lookup not wired yet";
+      } else {
+        partsResultsEl.textContent = `No local parts results for \"${q}\" yet.`;
+      }
+    };
+    partsSearchEl.addEventListener("input", updatePartsPlaceholder);
+    partsSearchEl.addEventListener("keydown", e => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        showTempMessage(partsMsgEl, "Parts lookup not wired yet");
+      }
+    });
+    updatePartsPlaceholder();
+  }
 
   // ---- Capture ------------------------------------------------------------
 
@@ -464,8 +550,11 @@
   // ---- Boot --------------------------------------------------------------
 
   if (!getConfig().url) {
+    restoreTagSelection();
+    updateActionTab();
     showSetup();
   } else {
+    restoreTagSelection();
     refreshContext();
     setInterval(refreshContext, CTX_REFRESH_MS);
     setInterval(refreshRecent, RECENT_REFRESH_MS);

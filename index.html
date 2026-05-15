@@ -19,6 +19,7 @@
     --accent-dark: #059669;
     --warn: #f59e0b;
     --error: #ef4444;
+    --bottom-nav-h: 74px;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; }
@@ -37,7 +38,59 @@
   }
   header h1 { margin: 0; font-size: 18px; font-weight: 600; }
   #setupLink { color: var(--muted); font-size: 13px; text-decoration: none; }
-  main { flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+  main {
+    flex: 1;
+    padding: 16px;
+    padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom) + 12px);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+  }
+
+  .tabContainer {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .tabPanel {
+    display: none;
+    flex-direction: column;
+    gap: 16px;
+    min-height: 0;
+  }
+  .tabPanel.active { display: flex; }
+
+  .bottomNav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+  }
+  .tabBtn {
+    min-height: 52px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .tabBtn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #052e1a;
+  }
 
   .ctxCard {
     background: var(--panel); border: 1px solid var(--border);
@@ -67,8 +120,10 @@
   .captureRow {
     margin-top: auto;
     display: flex; gap: 8px;
-    position: sticky; bottom: 0;
-    padding-bottom: env(safe-area-inset-bottom);
+    position: sticky;
+    bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom));
+    padding-bottom: 4px;
+    z-index: 5;
   }
   .captureBtn {
     flex: 1;
@@ -207,6 +262,60 @@
   }
   .recentItem .rText .rOcr { color: var(--muted); }
   .recentEmpty { padding: 4px 6px; color: var(--muted); font-size: 13px; }
+
+  .panelCard {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+  }
+  .panelTitle {
+    font-weight: 700;
+    font-size: 16px;
+    margin-bottom: 4px;
+  }
+  .panelSub {
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .actionGrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .actionBtn {
+    min-height: 56px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .actionMsg, .partsMsg {
+    color: var(--muted);
+    font-size: 13px;
+    min-height: 18px;
+  }
+  .partsSearch {
+    width: 100%;
+    padding: 12px;
+    font-size: 16px;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .partsResults {
+    background: var(--panel);
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    min-height: 140px;
+    padding: 12px;
+    color: var(--muted);
+    font-size: 14px;
+  }
 </style>
 </head>
 <body>
@@ -217,38 +326,77 @@
 </header>
 
 <main id="mainScreen">
-  <div id="ctx" class="ctxCard">Loading job context…</div>
+  <div class="tabContainer">
+    <section id="tabPhotos" class="tabPanel active">
+      <div id="ctx" class="ctxCard">Loading job context…</div>
 
-  <div>
-    <div style="font-size:13px; color:var(--muted); margin-bottom:6px;">Tag</div>
-    <div class="tagRow" id="tagRow">
-      <button class="tagBtn active" data-tag="serial">Serial</button>
-      <button class="tagBtn" data-tag="cup_count">Cup count</button>
-      <button class="tagBtn" data-tag="part_code">Part code</button>
-      <button class="tagBtn" data-tag="error">Error</button>
-      <button class="tagBtn" data-tag="general">General</button>
-    </div>
+      <div>
+        <div style="font-size:13px; color:var(--muted); margin-bottom:6px;">Tag</div>
+        <div class="tagRow" id="tagRow">
+          <button class="tagBtn active" data-tag="serial">Serial</button>
+          <button class="tagBtn" data-tag="cup_count">Cup count</button>
+          <button class="tagBtn" data-tag="part_code">Part code</button>
+          <button class="tagBtn" data-tag="error">Error</button>
+          <button class="tagBtn" data-tag="general">General</button>
+        </div>
+      </div>
+
+      <div id="pending" class="hidden"></div>
+      <div id="recent" class="recentBox hidden">
+        <div class="recentHead">
+          <span><span class="chev">▶</span> <span id="recentLabel">Recent photos for this job</span></span>
+          <span id="recentCount" style="font-size:12px;"></span>
+        </div>
+        <div class="recentList" id="recentList"></div>
+      </div>
+      <div id="uploads"></div>
+
+      <div class="captureRow">
+        <button id="captureBtn" class="captureBtn">📷 Take Photo</button>
+        <button id="galleryBtn" class="galleryBtn" aria-label="Upload from gallery">
+          <span class="galleryIcon">🖼️</span>
+          <span>Upload from Gallery</span>
+        </button>
+      </div>
+      <input type="file" id="fileInput" accept="image/*" capture="environment">
+      <input type="file" id="galleryInput" accept="image/*">
+    </section>
+
+    <section id="tabActions" class="tabPanel">
+      <div class="panelCard">
+        <div class="panelTitle">Current Job</div>
+        <div id="actionsJobSummary" class="panelSub">No active job</div>
+      </div>
+      <div class="panelCard">
+        <div class="panelTitle">Tablet</div>
+        <div class="panelSub">Tablet status: not wired yet</div>
+      </div>
+      <div class="actionGrid" id="actionGrid">
+        <button class="actionBtn" data-action="travel_start">Travel start</button>
+        <button class="actionBtn" data-action="on_site">On site</button>
+        <button class="actionBtn" data-action="off_site">Off site</button>
+        <button class="actionBtn" data-action="swms_no">SWMS = No</button>
+        <button class="actionBtn" data-action="electrical_cert_no">Electrical Cert = No</button>
+      </div>
+      <div id="actionMsg" class="actionMsg"></div>
+    </section>
+
+    <section id="tabParts" class="tabPanel">
+      <div class="panelCard">
+        <div class="panelTitle">Parts Lookup</div>
+        <div class="panelSub">Parts lookup not wired yet</div>
+      </div>
+      <input id="partsSearch" class="partsSearch" type="search" placeholder="Search part code or description">
+      <div id="partsMsg" class="partsMsg"></div>
+      <div id="partsResults" class="partsResults"></div>
+    </section>
   </div>
 
-  <div id="pending" class="hidden"></div>
-  <div id="recent" class="recentBox hidden">
-    <div class="recentHead">
-      <span><span class="chev">▶</span> <span id="recentLabel">Recent photos for this job</span></span>
-      <span id="recentCount" style="font-size:12px;"></span>
-    </div>
-    <div class="recentList" id="recentList"></div>
-  </div>
-  <div id="uploads"></div>
-
-  <div class="captureRow">
-    <button id="captureBtn" class="captureBtn">📷 Take Photo</button>
-    <button id="galleryBtn" class="galleryBtn" aria-label="Upload from gallery">
-      <span class="galleryIcon">🖼️</span>
-      <span>Upload from Gallery</span>
-    </button>
-  </div>
-  <input type="file" id="fileInput" accept="image/*" capture="environment">
-  <input type="file" id="galleryInput" accept="image/*">
+  <nav class="bottomNav" aria-label="Primary">
+    <button class="tabBtn active" data-tab="tabPhotos" type="button">Photos</button>
+    <button class="tabBtn" data-tab="tabActions" type="button">Actions</button>
+    <button class="tabBtn" data-tab="tabParts" type="button">Parts</button>
+  </nav>
 </main>
 
 <section id="setupScreen">
