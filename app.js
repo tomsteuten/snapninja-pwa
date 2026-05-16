@@ -9,6 +9,7 @@
 
   const STALE_MS = 8 * 60 * 60 * 1000; // 8h — confirm before capture
   const CTX_REFRESH_MS = 15000;
+  const AGENT_REFRESH_MS = 15000;
   const RESIZE_MAX_EDGE = 1600;
   const JPEG_QUALITY = 0.8;
 
@@ -29,6 +30,7 @@
   const tabPanels = Array.from(document.querySelectorAll(".tabPanel"));
   const tabButtons = Array.from(document.querySelectorAll(".tabBtn"));
   const actionsJobSummaryEl = $("actionsJobSummary");
+  const tabletStatusEl = $("tabletStatus");
   const actionGridEl = $("actionGrid");
   const actionMsgEl = $("actionMsg");
   const partsSearchEl = $("partsSearch");
@@ -51,6 +53,7 @@
   function switchTab(tabId) {
     tabPanels.forEach(panel => panel.classList.toggle("active", panel.id === tabId));
     tabButtons.forEach(btn => btn.classList.toggle("active", btn.dataset.tab === tabId));
+    if (tabId === "tabActions") refreshAgentStatus();
   }
 
   tabButtons.forEach(btn => {
@@ -69,6 +72,7 @@
     setup.classList.remove("show");
     main.classList.remove("hidden");
     refreshContext();
+    refreshAgentStatus();
   }
   $("setupLink").addEventListener("click", e => { e.preventDefault(); showSetup(); });
   $("cfgCancel").addEventListener("click", hideSetup);
@@ -149,6 +153,13 @@
     const h = Math.floor(m / 60);
     if (h < 24) return h + "h " + (m % 60) + "m";
     return Math.floor(h / 24) + "d";
+  }
+
+  function formatAgentAge(updatedAt) {
+    if (!updatedAt) return "";
+    const updatedMs = new Date(updatedAt).getTime();
+    if (Number.isNaN(updatedMs)) return "";
+    return formatAge(Math.max(0, Date.now() - updatedMs));
   }
 
   function isStale() {
@@ -235,6 +246,90 @@
     el.textContent = msg;
     clearTimeout(el._msgTimer);
     el._msgTimer = setTimeout(() => { el.textContent = ""; }, 2000);
+  }
+
+  function setTabletStatus(primary, tone, detail) {
+    if (!tabletStatusEl) return;
+    tabletStatusEl.className = "agentStatus" + (tone ? ` ${tone}` : "");
+    tabletStatusEl.innerHTML = `<div>${escapeHtml(primary)}</div>` +
+      (detail ? `<div class="agentStatusDetail">${escapeHtml(detail)}</div>` : "");
+  }
+
+  function buildAgentScore(agent) {
+    const isFresh = agent && agent.stale === false;
+    const isPartsNinja = String(agent && agent.agentType || "").toLowerCase() === "partsninja-python";
+    const updatedMs = new Date(agent && agent.updatedAt || 0).getTime();
+    return [isFresh ? 1 : 0, isPartsNinja ? 1 : 0, Number.isNaN(updatedMs) ? 0 : updatedMs];
+  }
+
+  function compareAgentScore(left, right) {
+    for (let i = 0; i < left.length; i += 1) {
+      if (left[i] !== right[i]) return right[i] - left[i];
+    }
+    return 0;
+  }
+
+  function pickBestAgent(agents) {
+    return agents
+      .filter(agent => agent && typeof agent === "object")
+      .slice()
+      .sort((a, b) => compareAgentScore(buildAgentScore(a), buildAgentScore(b)))[0] || null;
+  }
+
+  function buildAgentSummary(agent) {
+    const parts = ["Tablet online"];
+    if (agent.caseNum) parts.push(`CASE-${agent.caseNum}`);
+    if (agent.taskNum) parts.push(`TASK ${agent.taskNum}`);
+    return parts.join(" · ");
+  }
+
+  async function refreshAgentStatus() {
+    const { url, secret } = getConfig();
+    if (!url || !secret) {
+      setTabletStatus("Tablet status: setup needed", "error");
+      return;
+    }
+    try {
+      const response = await fetch(`${url}?action=agentStatus&secret=${encodeURIComponent(secret)}`);
+      const data = await response.json();
+      if (!data || data.ok !== true) {
+        setTabletStatus("Tablet status: backend error", "error");
+        return;
+      }
+      const agents = Array.isArray(data.agents) ? data.agents : [];
+      if (!agents.length) {
+        setTabletStatus("Tablet status: no tablet agent seen yet");
+        return;
+      }
+
+      const agent = pickBestAgent(agents);
+      if (!agent) {
+        setTabletStatus("Tablet status: no tablet agent seen yet");
+        return;
+      }
+
+      const age = formatAgentAge(agent.updatedAt);
+      if (agent.stale === true) {
+        setTabletStatus(
+          "Tablet status: offline or stale",
+          "stale",
+          age ? `Last update ${age} ago` : ""
+        );
+        return;
+      }
+
+      if (String(agent.status || "").toLowerCase() === "online") {
+        setTabletStatus(buildAgentSummary(agent), "online", agent.message || "");
+        return;
+      }
+
+      const details = [];
+      if (agent.message) details.push(agent.message);
+      if (age) details.push(`Updated ${age} ago`);
+      setTabletStatus(`Tablet status: ${agent.status || "seen"}`, "error", details.join(" · "));
+    } catch (e) {
+      setTabletStatus("Tablet status: cannot reach backend", "error");
+    }
   }
 
   function updateActionTab() {
@@ -552,11 +647,15 @@
   if (!getConfig().url) {
     restoreTagSelection();
     updateActionTab();
+    refreshAgentStatus();
+    setInterval(refreshAgentStatus, AGENT_REFRESH_MS);
     showSetup();
   } else {
     restoreTagSelection();
     refreshContext();
+    refreshAgentStatus();
     setInterval(refreshContext, CTX_REFRESH_MS);
+    setInterval(refreshAgentStatus, AGENT_REFRESH_MS);
     setInterval(refreshRecent, RECENT_REFRESH_MS);
     // Re-render age every 10s without re-fetching
     setInterval(() => { if (activeContext) renderContext(activeContext, null); }, 10000);

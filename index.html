@@ -298,6 +298,32 @@
     font-size: 13px;
     min-height: 18px;
   }
+  .agentStatus {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: rgba(15, 23, 42, 0.28);
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .agentStatus.online {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  .agentStatus.stale {
+    border-color: var(--warn);
+    color: var(--warn);
+  }
+  .agentStatus.error {
+    border-color: var(--error);
+    color: var(--text);
+  }
+  .agentStatusDetail {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 13px;
+  }
   .partsSearch {
     width: 100%;
     padding: 12px;
@@ -369,7 +395,7 @@
       </div>
       <div class="panelCard">
         <div class="panelTitle">Tablet</div>
-        <div class="panelSub">Tablet status: not wired yet</div>
+        <div id="tabletStatus" class="agentStatus">Tablet status: checking...</div>
       </div>
       <div class="actionGrid" id="actionGrid">
         <button class="actionBtn" data-action="travel_start">Travel start</button>
