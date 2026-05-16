@@ -293,10 +293,48 @@
     font-weight: 600;
     cursor: pointer;
   }
+  .actionBtn:active {
+    background: var(--border);
+  }
+  .actionBtn:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
   .actionMsg, .partsMsg {
     color: var(--muted);
     font-size: 13px;
     min-height: 18px;
+  }
+  .actionQueueStatus {
+    min-height: 48px;
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: rgba(15, 23, 42, 0.28);
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  .actionQueueStatus.pending {
+    border-color: var(--warn);
+    color: var(--text);
+  }
+  .actionQueueStatus.online {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  .actionQueueStatus.warn {
+    border-color: var(--warn);
+    color: var(--warn);
+  }
+  .actionQueueStatus.error {
+    border-color: var(--error);
+    color: var(--text);
+  }
+  .actionQueueStatusDetail {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 13px;
   }
   .agentStatus {
     margin-top: 10px;
@@ -398,13 +436,13 @@
         <div id="tabletStatus" class="agentStatus">Tablet status: checking...</div>
       </div>
       <div class="actionGrid" id="actionGrid">
-        <button class="actionBtn" data-action="travel_start">Travel start</button>
-        <button class="actionBtn" data-action="on_site">On site</button>
-        <button class="actionBtn" data-action="off_site">Off site</button>
-        <button class="actionBtn" data-action="swms_no">SWMS = No</button>
-        <button class="actionBtn" data-action="electrical_cert_no">Electrical Cert = No</button>
+        <button class="actionBtn" data-command="travelStart">Travel start</button>
+        <button class="actionBtn" data-command="onsite">On site</button>
+        <button class="actionBtn" data-command="offsite">Off site</button>
+        <button class="actionBtn" data-command="swmsNo">SWMS = No</button>
+        <button class="actionBtn" data-command="electricalCertNo">Electrical Cert = No</button>
       </div>
-      <div id="actionMsg" class="actionMsg"></div>
+      <div id="actionQueueStatus" class="actionQueueStatus"></div>
     </section>
 
     <section id="tabParts" class="tabPanel">
@@ -437,10 +475,10 @@
   <button id="cfgCancel" style="background:var(--border); color:var(--text);">Cancel</button>
 </section>
 
-<script src="app.js?v=20260516d"></script>
+<script src="app.js?v=20260516e"></script>
 <script>
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js?v=20260516d').catch(()=>{});
+    navigator.serviceWorker.register('sw.js?v=20260516e').catch(()=>{});
   }
 </script>
 </body>

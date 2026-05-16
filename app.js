@@ -10,6 +10,8 @@
   const STALE_MS = 8 * 60 * 60 * 1000; // 8h — confirm before capture
   const CTX_REFRESH_MS = 15000;
   const AGENT_REFRESH_MS = 15000;
+  const MACRO_STATUS_POLL_MS = 3000;
+  const MACRO_STATUS_POLL_MAX_MS = 30000;
   const RESIZE_MAX_EDGE = 1600;
   const JPEG_QUALITY = 0.8;
 
@@ -32,7 +34,7 @@
   const actionsJobSummaryEl = $("actionsJobSummary");
   const tabletStatusEl = $("tabletStatus");
   const actionGridEl = $("actionGrid");
-  const actionMsgEl = $("actionMsg");
+  const actionQueueStatusEl = $("actionQueueStatus");
   const partsSearchEl = $("partsSearch");
   const partsMsgEl = $("partsMsg");
   const partsResultsEl = $("partsResults");
@@ -47,6 +49,17 @@
   const validTags = new Set(Array.from(tagRow.querySelectorAll(".tagBtn")).map(b => b.dataset.tag));
   let activeContext = null;
   let confirmedStale = false; // user has tapped through staleness for current ctx
+  let pendingActionConfirm = null;
+
+  const FINAL_MACRO_STATUSES = { DONE: true, FAILED: true, CANCELLED: true };
+  const ACTION_STATUS_LABELS = {
+    PENDING: "Queued",
+    CLAIMED: "Claimed by tablet",
+    RUNNING: "Running on tablet",
+    DONE: "Done",
+    FAILED: "Failed",
+    CANCELLED: "Cancelled"
+  };
 
   // ---- Tabs ---------------------------------------------------------------
 
@@ -248,6 +261,180 @@
     el._msgTimer = setTimeout(() => { el.textContent = ""; }, 2000);
   }
 
+  function setActionQueueStatus(primary, tone, detail) {
+    if (!actionQueueStatusEl) return;
+    actionQueueStatusEl.className = "actionQueueStatus" + (tone ? ` ${tone}` : "");
+    actionQueueStatusEl.innerHTML = `<div>${escapeHtml(primary)}</div>` +
+      (detail ? `<div class="actionQueueStatusDetail">${escapeHtml(detail)}</div>` : "");
+  }
+
+  function hasActionConfig() {
+    const { url, secret } = getConfig();
+    return Boolean(url && secret);
+  }
+
+  function formatCaseLabel(caseNum) {
+    const raw = String(caseNum || "").trim();
+    if (!raw) return "CASE-?";
+    return /^CASE[-\s]?/i.test(raw) ? raw.toUpperCase() : `CASE-${raw}`;
+  }
+
+  function updateActionButtons() {
+    if (!actionGridEl) return;
+    const disabled = !activeContext || !activeContext.caseNum || !activeContext.taskNum || !hasActionConfig();
+    actionGridEl.querySelectorAll(".actionBtn").forEach(btn => {
+      btn.disabled = disabled || btn.dataset.busy === "true";
+    });
+  }
+
+  function buildActionJobSummary(ctx) {
+    return `${formatCaseLabel(ctx.caseNum)} TASK ${ctx.taskNum}`;
+  }
+
+  function buildQueuePayload(command) {
+    return {
+      action: "queueMacro",
+      secret: getConfig().secret,
+      command: command,
+      caseNum: activeContext.caseNum,
+      taskNum: activeContext.taskNum,
+      woNum: activeContext.woNum || "",
+      site: activeContext.site || "",
+      assetNum: activeContext.assetNum || "",
+      contextWrittenAt: activeContext.writtenAt || "",
+      requestedBy: "snapninja-pwa",
+      source: "phone-pwa",
+      payload: {
+        queuedFromTab: "Actions",
+        contextWrittenAt: activeContext.writtenAt || "",
+        userAgent: navigator.userAgent || ""
+      }
+    };
+  }
+
+  async function parseJsonResponse(response) {
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      const snippet = text.slice(0, 240).replace(/\s+/g, " ");
+      throw new Error(`Bad JSON (status ${response.status}): ${snippet || "empty response"}`);
+    }
+  }
+
+  function buildQueuedMessage(action) {
+    return `Queued for ${formatCaseLabel(action.caseNum)} TASK ${action.taskNum}`;
+  }
+
+  function buildMacroStatusMessage(action) {
+    const status = String(action.status || "").toUpperCase();
+    const label = ACTION_STATUS_LABELS[status] || status || "Queued";
+    return `${label} for ${formatCaseLabel(action.caseNum)} TASK ${action.taskNum}`;
+  }
+
+  function buildMacroStatusDetail(action) {
+    const detail = [];
+    if (action.label) detail.push(action.label);
+    if (action.resultMessage) detail.push(action.resultMessage);
+    if (action.lastError) detail.push(action.lastError);
+    return detail.join(" · ");
+  }
+
+  function getActionStatusTone(action) {
+    const status = String(action.status || "").toUpperCase();
+    if (status === "FAILED" || status === "CANCELLED") return "error";
+    if (status === "DONE") return "online";
+    return "pending";
+  }
+
+  async function pollMacroStatus(actionId) {
+    const { url, secret } = getConfig();
+    if (!url || !secret || !actionId) return;
+    const deadline = Date.now() + MACRO_STATUS_POLL_MAX_MS;
+
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, MACRO_STATUS_POLL_MS));
+      try {
+        const response = await fetch(
+          `${url}?action=macroStatus&secret=${encodeURIComponent(secret)}&actionId=${encodeURIComponent(actionId)}`
+        );
+        const data = await parseJsonResponse(response);
+        if (!data || data.ok !== true || !Array.isArray(data.actions) || !data.actions.length) continue;
+
+        const action = data.actions[0];
+        setActionQueueStatus(
+          buildMacroStatusMessage(action),
+          getActionStatusTone(action),
+          buildMacroStatusDetail(action)
+        );
+        if (FINAL_MACRO_STATUSES[String(action.status || "").toUpperCase()]) return;
+      } catch (e) {
+        return;
+      }
+    }
+  }
+
+  async function queueMacro(command) {
+    const { url, secret } = getConfig();
+    if (!url || !secret) {
+      setActionQueueStatus("Action queue unavailable", "error", "Setup needed.");
+      return null;
+    }
+    if (!activeContext || !activeContext.caseNum || !activeContext.taskNum) {
+      setActionQueueStatus("No active job", "error", "Open a job on the Surface first.");
+      return null;
+    }
+    if (isStale()) {
+      const now = Date.now();
+      if (!pendingActionConfirm || pendingActionConfirm.command !== command || pendingActionConfirm.expiresAt < now) {
+        pendingActionConfirm = { command: command, expiresAt: now + 15000 };
+        setActionQueueStatus(
+          `Job context is stale for ${buildActionJobSummary(activeContext)}`,
+          "warn",
+          "Tap the same action again within 15s to queue it anyway."
+        );
+        return null;
+      }
+    }
+    pendingActionConfirm = null;
+
+    const requestBody = buildQueuePayload(command);
+    setActionQueueStatus(
+      `Queueing for ${buildActionJobSummary(activeContext)}`,
+      "pending",
+      command
+    );
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(requestBody),
+        redirect: "follow"
+      });
+      const data = await parseJsonResponse(response);
+      if (!data || data.ok !== true || !data.action) {
+        setActionQueueStatus(
+          "Action queue backend error",
+          "error",
+          data && data.error ? data.error : "Unknown backend error"
+        );
+        return null;
+      }
+
+      setActionQueueStatus(
+        buildQueuedMessage(data.action),
+        "pending",
+        data.action.label || data.action.command || "Queued"
+      );
+      pollMacroStatus(data.action.actionId);
+      return data.action;
+    } catch (e) {
+      setActionQueueStatus("Action queue network error", "error", e.message);
+      return null;
+    }
+  }
+
   function setTabletStatus(primary, tone, detail) {
     if (!tabletStatusEl) return;
     tabletStatusEl.className = "agentStatus" + (tone ? ` ${tone}` : "");
@@ -334,23 +521,46 @@
 
   function updateActionTab() {
     if (!actionsJobSummaryEl || !actionGridEl) return;
+    if (!hasActionConfig()) {
+      actionsJobSummaryEl.textContent = "Setup needed to queue tablet actions.";
+      updateActionButtons();
+      if (actionQueueStatusEl && !actionQueueStatusEl.textContent.trim()) {
+        setActionQueueStatus("Action queue unavailable", "error", "Add Apps Script URL and secret in setup.");
+      }
+      return;
+    }
     if (!activeContext) {
       actionsJobSummaryEl.textContent = "No active job. Open a job on the Surface (NetSuite Ninja) first.";
-      actionGridEl.querySelectorAll(".actionBtn").forEach(btn => { btn.disabled = true; });
+      updateActionButtons();
+      if (actionQueueStatusEl && !actionQueueStatusEl.textContent.trim()) {
+        setActionQueueStatus("No active job", "error", "Open a job on the Surface first.");
+      }
       return;
     }
     actionsJobSummaryEl.textContent =
       `CASE-${activeContext.caseNum} · TASK ${activeContext.taskNum}` +
       `${activeContext.site ? ` · ${activeContext.site}` : ""}` +
       `${activeContext.assetNum ? ` · ${activeContext.assetNum}` : ""}`;
-    actionGridEl.querySelectorAll(".actionBtn").forEach(btn => { btn.disabled = false; });
+    updateActionButtons();
+    if (actionQueueStatusEl && !actionQueueStatusEl.textContent.trim()) {
+      setActionQueueStatus(`Ready for ${buildActionJobSummary(activeContext)}`, "pending", "Tap an action to queue it for the tablet.");
+    }
   }
 
   if (actionGridEl) {
-    actionGridEl.addEventListener("click", e => {
+    actionGridEl.addEventListener("click", async e => {
       const btn = e.target.closest(".actionBtn");
       if (!btn || btn.disabled) return;
-      showTempMessage(actionMsgEl, "Action queue not wired yet");
+      const command = btn.dataset.command;
+      if (!command) return;
+      btn.dataset.busy = "true";
+      updateActionButtons();
+      try {
+        await queueMacro(command);
+      } finally {
+        delete btn.dataset.busy;
+        updateActionButtons();
+      }
     });
   }
 

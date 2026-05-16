@@ -1,7 +1,7 @@
 // Service worker — network-first for the app shell so GitHub Pages updates
 // are picked up on the next open. Falls back to cache when offline.
-const CACHE = "snapninja-v11";
-const SHELL = ["./", "./index.html", "./app.js?v=20260516d", "./manifest.webmanifest"];
+const CACHE = "snapninja-v12";
+const SHELL = ["./", "./index.html", "./app.js?v=20260516e", "./manifest.webmanifest"];
 
 self.addEventListener("install", e => {
   e.waitUntil(
